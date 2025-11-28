@@ -1,24 +1,26 @@
-# Title
+# Terraform Randum UUID
 
-Describe the purpose of the module.
+Ramdom UUID module generate and return athe value as output.
+
+A UUID (Universally Unique Identifier) is a 128-bit number used to uniquely identify information in computer systems, typically displayed as a 36-character string of hexadecimal digits separated by hyphens. Its purpose is to create a unique identifier that is so unlikely to be duplicated that it can be generated locally on different systems without needing a central authority.
 
 ## Permissions
 
-Describe the required permissions to use the module.
+N/A
 
 ## Authentication
 
-Describe the methods for authenticating with the requried providers.
+N/A
 
 ## Features
 
-Describe the feature supported by the module.
+Generate a Universally Unique Identifier.
 
 ## Usage example
 
 ```hcl
-module "name" {
-  source  = "app.terraform.io/"
+module "uuid" {
+  source  = "app.terraform.io/random/uuid"
   version = "0.0.0"
 }
 ```
