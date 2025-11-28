@@ -1,9 +1,9 @@
-# This file will contain the required providers for your module.
-# Each Terraform module must declare which providers it requires, so that Terraform
-# can install and use them.
-
 terraform {
-
-  required_version = ">= 1.13.0"
-
+  required_providers {
+    random = {
+      source  = "hashicorp/random"
+      version = "3.7.2"
+    }
+  }
+  required_version = ">= 1.7.5"
 }
