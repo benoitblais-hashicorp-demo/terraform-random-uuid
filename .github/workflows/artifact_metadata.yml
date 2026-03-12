@@ -1,0 +1,127 @@
+# This workflow runs after `Publish module version` or manually.
+#
+# `Update artifact metadata storage record` computes a SHA256 digest from the release tarball
+# and updates GitHub linked-artifacts storage metadata for this Terraform module.
+#
+# Documentation
+# - https://docs.github.com/en/rest/orgs/artifact-metadata?apiVersion=2022-11-28
+
+name: Update artifact metadata
+
+on:  # yamllint disable-line rule:truthy
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Optional release tag to publish (for example v1.2.3). If empty, latest release tag is used."
+        required: false
+        type: string
+  workflow_run:
+    workflows: ["Publish module version"]
+    types:
+      - completed
+
+permissions:
+  contents: write
+
+jobs:
+  artifact-metadata:
+    name: Update artifact metadata storage record
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.ARTIFACT_METADATA_TOKEN || secrets.GITHUB_TOKEN }}
+      GITHUB_API_VERSION: "2022-11-28"
+      TFC_ORGANIZATION: "benoitblais-hashicorp"
+    steps:
+
+      - name: Build payload values
+        id: values
+        run: |
+          set -euo pipefail
+
+          repo_name="${GITHUB_REPOSITORY#*/}"
+          echo "INFO     | GitHub repository name: ${repo_name}"
+
+          repository_name_array=$(echo "${repo_name}" | tr "-" " ")
+          read -r -a array <<< "${repository_name_array}"
+          module_provider="${array[1]}"
+          module_name=$(echo "${repo_name}" | sed -n -e "s/^.*-${module_provider}-//p")
+
+          manual_release_tag=$(jq -r '.inputs.release_tag // empty' "${GITHUB_EVENT_PATH}")
+
+          if [[ -n "${manual_release_tag}" ]]; then
+            release_tag="${manual_release_tag}"
+          else
+            release_tag=$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name')
+          fi
+
+          version="${release_tag#v}"
+          tarball_url=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${release_tag}" --jq '.tarball_url')
+
+          echo "INFO     | Module provider: ${module_provider}"
+          echo "INFO     | Module name: ${module_name}"
+          echo "INFO     | Release tag: ${release_tag}"
+          echo "INFO     | Module version: ${version}"
+
+          curl -sSL \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            "${tarball_url}" \
+            -o module.tar.gz
+
+          digest="sha256:$(sha256sum module.tar.gz | awk '{print $1}')"
+
+          artifact_name="${module_name}"
+          artifact_url="https://app.terraform.io/app/${TFC_ORGANIZATION}/registry/modules/private/${TFC_ORGANIZATION}/${module_name}/${module_provider}/${version}"
+          registry_url="https://app.terraform.io/app/${TFC_ORGANIZATION}/registry/modules/private"
+
+          {
+            echo "module_provider=${module_provider}"
+            echo "module_name=${module_name}"
+            echo "release_tag=${release_tag}"
+            echo "version=${version}"
+            echo "digest=${digest}"
+            echo "artifact_name=${artifact_name}"
+            echo "artifact_url=${artifact_url}"
+            echo "registry_url=${registry_url}"
+            echo "repository_name=${repo_name}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create artifact metadata storage record
+        run: |
+          set -euo pipefail
+
+          json_payload=$(jq -n \
+            --arg name "${{ steps.values.outputs.artifact_name }}" \
+            --arg version "${{ steps.values.outputs.version }}" \
+            --arg digest "${{ steps.values.outputs.digest }}" \
+            --arg artifact_url "${{ steps.values.outputs.artifact_url }}" \
+            --arg registry_url "${{ steps.values.outputs.registry_url }}" \
+            --arg repository "${{ steps.values.outputs.module_name }}" \
+            --arg github_repository "${{ steps.values.outputs.repository_name }}" \
+            '{
+              name: $name,
+              version: $version,
+              digest: $digest,
+              artifact_url: $artifact_url,
+              registry_url: $registry_url,
+              repository: $repository,
+              status: "active",
+              github_repository: $github_repository
+            }')
+
+          response=$(curl -sS --request POST \
+            --url "https://api.github.com/orgs/${GITHUB_REPOSITORY_OWNER}/artifacts/metadata/storage-record" \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer ${GITHUB_TOKEN}" \
+            --header "X-GitHub-Api-Version: ${GITHUB_API_VERSION}" \
+            --data "${json_payload}")
+
+          if ! [[ "${response}" =~ "storage_records" ]]; then
+            echo "ERROR    | Unable to create artifact metadata storage record."
+            echo "${response}"
+            exit 1
+          fi
+
+          echo "INFO     | Artifact metadata storage record updated successfully."
+          echo "${response}" | jq
