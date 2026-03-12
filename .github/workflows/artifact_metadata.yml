@@ -21,7 +21,9 @@ on:  # yamllint disable-line rule:truthy
       - completed
 
 permissions:
-  contents: write
+  contents: read
+  id-token: write
+  attestations: write
 
 jobs:
   artifact-metadata:
@@ -33,6 +35,11 @@ jobs:
       GITHUB_API_VERSION: "2022-11-28"
       TFC_ORGANIZATION: "benoitblais-hashicorp"
     steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Build payload values
         id: values
@@ -56,18 +63,14 @@ jobs:
           fi
 
           version="${release_tag#v}"
-          tarball_url=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${release_tag}" --jq '.tarball_url')
+          git rev-parse --verify "refs/tags/${release_tag}" > /dev/null
 
           echo "INFO     | Module provider: ${module_provider}"
           echo "INFO     | Module name: ${module_name}"
           echo "INFO     | Release tag: ${release_tag}"
           echo "INFO     | Module version: ${version}"
 
-          curl -sSL \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-            "${tarball_url}" \
-            -o module.tar.gz
+          git archive --format=tar.gz --output=module.tar.gz "${release_tag}"
 
           digest="sha256:$(sha256sum module.tar.gz | awk '{print $1}')"
 
@@ -86,6 +89,11 @@ jobs:
             echo "registry_url=${registry_url}"
             echo "repository_name=${repo_name}"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Create attestation for module artifact
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: module.tar.gz
 
       - name: Create artifact metadata storage record
         run: |
@@ -110,18 +118,29 @@ jobs:
               github_repository: $github_repository
             }')
 
-          response=$(curl -sS --request POST \
-            --url "https://api.github.com/orgs/${GITHUB_REPOSITORY_OWNER}/artifacts/metadata/storage-record" \
-            --header "Accept: application/vnd.github+json" \
-            --header "Authorization: Bearer ${GITHUB_TOKEN}" \
-            --header "X-GitHub-Api-Version: ${GITHUB_API_VERSION}" \
-            --data "${json_payload}")
+          response=""
+          for attempt in 1 2 3 4 5; do
+            response=$(curl -sS --request POST \
+              --url "https://api.github.com/orgs/${GITHUB_REPOSITORY_OWNER}/artifacts/metadata/storage-record" \
+              --header "Accept: application/vnd.github+json" \
+              --header "Authorization: Bearer ${GITHUB_TOKEN}" \
+              --header "X-GitHub-Api-Version: ${GITHUB_API_VERSION}" \
+              --data "${json_payload}")
 
-          if ! [[ "${response}" =~ "storage_records" ]]; then
+            if [[ "${response}" =~ "storage_records" ]]; then
+              break
+            fi
+
+            if [[ "${response}" =~ "no artifacts found" ]] && [[ "${attempt}" -lt 5 ]]; then
+              echo "WARN     | Artifact not indexed yet (attempt ${attempt}/5). Retrying in 10 seconds."
+              sleep 10
+              continue
+            fi
+
             echo "ERROR    | Unable to create artifact metadata storage record."
             echo "${response}"
             exit 1
-          fi
+          done
 
           echo "INFO     | Artifact metadata storage record updated successfully."
           echo "${response}" | jq
