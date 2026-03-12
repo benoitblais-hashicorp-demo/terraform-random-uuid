@@ -1,7 +1,13 @@
-# This workflow runs after `Publish module version` or manually.
+# This workflow runs manually for backfill/testing.
 #
 # `Update artifact metadata storage record` computes a SHA256 digest from the release tarball
 # and updates GitHub linked-artifacts storage metadata for this Terraform module.
+#
+# Secret requirement:
+# - `ARTIFACT_METADATA_TOKEN` (fine-grained PAT)
+#   Required repository permissions:
+#   - Artifact metadata: Write
+#   - Contents: Read (or Write)
 #
 # Documentation
 # - https://docs.github.com/en/rest/orgs/artifact-metadata?apiVersion=2022-11-28
@@ -15,10 +21,6 @@ on:  # yamllint disable-line rule:truthy
         description: "Optional release tag to publish (for example v1.2.3). If empty, latest release tag is used."
         required: false
         type: string
-  workflow_run:
-    workflows: ["Publish module version"]
-    types:
-      - completed
 
 permissions:
   contents: write
@@ -28,7 +30,7 @@ permissions:
 jobs:
   artifact-metadata:
     name: Update artifact metadata storage record
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     env:
       API_TOKEN: ${{ secrets.ARTIFACT_METADATA_TOKEN || github.token }}
