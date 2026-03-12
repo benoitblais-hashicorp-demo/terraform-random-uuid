@@ -84,45 +84,13 @@ jobs:
             echo "release_tag=${release_tag}"
             echo "version=${version}"
             echo "local_digest=${local_digest}"
-            echo "artifact_file=module-${version}.tar.gz"
             echo "artifact_name=${artifact_name}"
             echo "artifact_url=${artifact_url}"
             echo "registry_url=${registry_url}"
             echo "repository_name=${repo_name}"
-            echo "repository_full_name=${GITHUB_REPOSITORY}"
           } >> "$GITHUB_OUTPUT"
 
           mv module.tar.gz "${{ github.workspace }}/${artifact_name}-${version}.tar.gz"
-
-      - name: Upload module archive artifact
-        id: upload_artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: module-release-${{ steps.values.outputs.version }}
-          path: ${{ github.workspace }}/${{ steps.values.outputs.artifact_name }}-${{ steps.values.outputs.version }}.tar.gz
-          if-no-files-found: error
-          retention-days: 1
-
-      - name: Select digest for metadata API
-        id: digest
-        run: |
-          set -euo pipefail
-
-          raw_digest="${{ steps.upload_artifact.outputs.artifact-digest }}"
-          if [[ -z "${raw_digest}" ]]; then
-            echo "ERROR    | upload-artifact did not return artifact-digest output."
-            exit 1
-          fi
-
-          if [[ "${raw_digest}" == sha256:* ]]; then
-            subject_digest="${raw_digest}"
-          else
-            subject_digest="sha256:${raw_digest}"
-          fi
-
-          echo "INFO     | Local file digest: ${{ steps.values.outputs.local_digest }}"
-          echo "INFO     | Uploaded artifact digest: ${subject_digest}"
-          echo "subject_digest=${subject_digest}" >> "$GITHUB_OUTPUT"
 
       - name: Create attestation for module artifact
         uses: actions/attest-build-provenance@v2
@@ -134,7 +102,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          subject_digest="${{ steps.digest.outputs.subject_digest }}"
+          subject_digest="${{ steps.values.outputs.local_digest }}"
           response=$(curl -sS --request GET \
             --url "https://api.github.com/users/${GITHUB_REPOSITORY_OWNER}/attestations/${subject_digest}" \
             --header "Accept: application/vnd.github+json" \
@@ -151,11 +119,11 @@ jobs:
           json_payload=$(jq -n \
             --arg name "${{ steps.values.outputs.artifact_name }}" \
             --arg version "${{ steps.values.outputs.version }}" \
-            --arg digest "${{ steps.digest.outputs.subject_digest }}" \
+            --arg digest "${{ steps.values.outputs.local_digest }}" \
             --arg artifact_url "${{ steps.values.outputs.artifact_url }}" \
             --arg registry_url "${{ steps.values.outputs.registry_url }}" \
             --arg repository "${{ steps.values.outputs.module_name }}" \
-            --arg github_repository "${{ steps.values.outputs.repository_full_name }}" \
+            --arg github_repository "${{ steps.values.outputs.repository_name }}" \
             '{
               name: $name,
               version: $version,
