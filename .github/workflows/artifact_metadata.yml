@@ -75,6 +75,7 @@ jobs:
           local_digest="sha256:$(sha256sum module.tar.gz | awk '{print $1}')"
 
           artifact_name="${module_name}"
+          artifact_subject_name="${module_name}-${version}.tar.gz"
           artifact_url="https://app.terraform.io/app/${TFC_ORGANIZATION}/registry/modules/private/${TFC_ORGANIZATION}/${module_name}/${module_provider}/${version}"
           registry_url="https://app.terraform.io/app/${TFC_ORGANIZATION}/registry/modules/private"
 
@@ -85,6 +86,7 @@ jobs:
             echo "version=${version}"
             echo "local_digest=${local_digest}"
             echo "artifact_name=${artifact_name}"
+            echo "artifact_subject_name=${artifact_subject_name}"
             echo "artifact_url=${artifact_url}"
             echo "registry_url=${registry_url}"
             echo "repository_name=${repo_name}"
@@ -103,6 +105,7 @@ jobs:
           set -euo pipefail
 
           subject_digest="${{ steps.values.outputs.local_digest }}"
+          repository_id=$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.id')
           response=$(curl -sS --request GET \
             --url "https://api.github.com/users/${GITHUB_REPOSITORY_OWNER}/attestations/${subject_digest}" \
             --header "Accept: application/vnd.github+json" \
@@ -110,14 +113,19 @@ jobs:
             --header "X-GitHub-Api-Version: ${GITHUB_API_VERSION}")
 
           count=$(echo "${response}" | jq -r '.attestations | length // 0' 2>/dev/null || echo "0")
+          matching_repo_count=$(echo "${response}" | jq -r --argjson repository_id "${repository_id}" '[.attestations[]? | select(.repository_id == $repository_id)] | length')
+          repo_ids=$(echo "${response}" | jq -r '[.attestations[]?.repository_id] | unique | join(",")')
           echo "INFO     | Attestations found for ${subject_digest}: ${count}"
+          echo "INFO     | Current repository_id: ${repository_id}"
+          echo "INFO     | Attestation repository_ids: ${repo_ids}"
+          echo "INFO     | Attestations for current repository: ${matching_repo_count}"
 
       - name: Create artifact metadata storage record
         run: |
           set -euo pipefail
 
           json_payload=$(jq -n \
-            --arg name "${{ steps.values.outputs.artifact_name }}" \
+            --arg name "${{ steps.values.outputs.artifact_subject_name }}" \
             --arg version "${{ steps.values.outputs.version }}" \
             --arg digest "${{ steps.values.outputs.local_digest }}" \
             --arg artifact_url "${{ steps.values.outputs.artifact_url }}" \
