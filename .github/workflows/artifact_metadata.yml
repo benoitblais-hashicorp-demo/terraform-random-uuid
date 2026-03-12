@@ -146,10 +146,25 @@ jobs:
         run: |
           set -euo pipefail
 
+          subject_digest="${{ steps.values.outputs.local_digest }}"
+          existing_response=$(curl -sS --request GET \
+            --url "https://api.github.com/orgs/${GITHUB_REPOSITORY_OWNER}/artifacts/${subject_digest}/metadata/storage-records" \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer ${API_TOKEN}" \
+            --header "X-GitHub-Api-Version: ${GITHUB_API_VERSION}")
+
+          existing_count=$(echo "${existing_response}" | jq -r --arg name "${{ steps.values.outputs.artifact_subject_name }}" --arg artifact_url "${{ steps.values.outputs.artifact_url }}" '[.storage_records[]? | select(.name == $name or .artifact_url == $artifact_url)] | length' 2>/dev/null || echo "0")
+
+          if [[ "${existing_count}" -gt 0 ]]; then
+            echo "INFO     | Matching storage record already exists for digest ${subject_digest}."
+            echo "INFO     | Skipping create to avoid duplicate entries."
+            exit 0
+          fi
+
           json_payload=$(jq -n \
             --arg name "${{ steps.values.outputs.artifact_subject_name }}" \
             --arg version "${{ steps.values.outputs.version }}" \
-            --arg digest "${{ steps.values.outputs.local_digest }}" \
+            --arg digest "${subject_digest}" \
             --arg artifact_url "${{ steps.values.outputs.artifact_url }}" \
             --arg registry_url "${{ steps.values.outputs.registry_url }}" \
             --arg repository "${{ steps.values.outputs.module_name }}" \
