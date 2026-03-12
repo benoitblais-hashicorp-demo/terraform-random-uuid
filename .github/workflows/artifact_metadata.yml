@@ -21,7 +21,7 @@ on:  # yamllint disable-line rule:truthy
       - completed
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
   attestations: write
 
@@ -31,7 +31,7 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     env:
-      GITHUB_TOKEN: ${{ secrets.ARTIFACT_METADATA_TOKEN || secrets.GITHUB_TOKEN }}
+      GITHUB_TOKEN: ${{ github.token }}
       GITHUB_API_VERSION: "2022-11-28"
       TFC_ORGANIZATION: "benoitblais-hashicorp"
     steps:
@@ -84,16 +84,27 @@ jobs:
             echo "release_tag=${release_tag}"
             echo "version=${version}"
             echo "digest=${digest}"
+            echo "artifact_file=module-${version}.tar.gz"
             echo "artifact_name=${artifact_name}"
             echo "artifact_url=${artifact_url}"
             echo "registry_url=${registry_url}"
             echo "repository_name=${repo_name}"
           } >> "$GITHUB_OUTPUT"
 
+          mv module.tar.gz "${{ github.workspace }}/${artifact_name}-${version}.tar.gz"
+
+      - name: Upload module archive artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: module-release-${{ steps.values.outputs.version }}
+          path: ${{ github.workspace }}/${{ steps.values.outputs.artifact_name }}-${{ steps.values.outputs.version }}.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Create attestation for module artifact
         uses: actions/attest-build-provenance@v2
         with:
-          subject-path: module.tar.gz
+          subject-path: ${{ github.workspace }}/${{ steps.values.outputs.artifact_name }}-${{ steps.values.outputs.version }}.tar.gz
 
       - name: Create artifact metadata storage record
         run: |
@@ -119,7 +130,7 @@ jobs:
             }')
 
           response=""
-          for attempt in 1 2 3 4 5; do
+          for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
             response=$(curl -sS --request POST \
               --url "https://api.github.com/orgs/${GITHUB_REPOSITORY_OWNER}/artifacts/metadata/storage-record" \
               --header "Accept: application/vnd.github+json" \
@@ -131,9 +142,9 @@ jobs:
               break
             fi
 
-            if [[ "${response}" =~ "no artifacts found" ]] && [[ "${attempt}" -lt 5 ]]; then
-              echo "WARN     | Artifact not indexed yet (attempt ${attempt}/5). Retrying in 10 seconds."
-              sleep 10
+            if [[ "${response}" =~ "no artifacts found" ]] && [[ "${attempt}" -lt 12 ]]; then
+              echo "WARN     | Artifact not indexed yet (attempt ${attempt}/12). Retrying in 15 seconds."
+              sleep 15
               continue
             fi
 
