@@ -97,7 +97,7 @@ jobs:
           local_digest="sha256:$(sha256sum module.tar.gz | awk '{print $1}')"
 
           artifact_name="${module_name}"
-          artifact_subject_name="${module_name}-${version}.tar.gz"
+          artifact_subject_name="${repo_name}-${version}.tar.gz"
           artifact_url="https://app.terraform.io/app/${TFC_ORGANIZATION}/registry/modules/private/${TFC_ORGANIZATION}/${module_name}/${module_provider}/${version}"
           registry_url="https://app.terraform.io/app/${TFC_ORGANIZATION}/registry/modules/private"
 
