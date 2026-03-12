@@ -31,10 +31,32 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     env:
-      GITHUB_TOKEN: ${{ github.token }}
+      API_TOKEN: ${{ secrets.ARTIFACT_METADATA_TOKEN || github.token }}
       GITHUB_API_VERSION: "2026-03-10"
       TFC_ORGANIZATION: "benoitblais-hashicorp"
     steps:
+
+      - name: Validate API token for organization metadata
+        run: |
+          set -euo pipefail
+
+          if [[ -n "${{ secrets.ARTIFACT_METADATA_TOKEN }}" ]]; then
+            echo "INFO     | Using ARTIFACT_METADATA_TOKEN secret for org metadata API calls."
+          else
+            echo "WARN     | ARTIFACT_METADATA_TOKEN is not set. Falling back to github.token (may be insufficient for org metadata endpoints)."
+          fi
+
+          scope_response=$(curl -sS -i --request GET \
+            --url "https://api.github.com/orgs/${GITHUB_REPOSITORY_OWNER}" \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer ${API_TOKEN}" \
+            --header "X-GitHub-Api-Version: ${GITHUB_API_VERSION}")
+
+          status=$(echo "${scope_response}" | head -n 1 | awk '{print $2}')
+          if [[ "${status}" != "200" ]]; then
+            echo "ERROR    | API token cannot access organization ${GITHUB_REPOSITORY_OWNER} (HTTP ${status})."
+            exit 1
+          fi
 
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -109,7 +131,7 @@ jobs:
           response=$(curl -sS --request GET \
             --url "https://api.github.com/users/${GITHUB_REPOSITORY_OWNER}/attestations/${subject_digest}" \
             --header "Accept: application/vnd.github+json" \
-            --header "Authorization: Bearer ${GITHUB_TOKEN}" \
+            --header "Authorization: Bearer ${API_TOKEN}" \
             --header "X-GitHub-Api-Version: ${GITHUB_API_VERSION}")
 
           count=$(echo "${response}" | jq -r '.attestations | length // 0' 2>/dev/null || echo "0")
@@ -148,7 +170,7 @@ jobs:
             response=$(curl -sS --request POST \
               --url "https://api.github.com/orgs/${GITHUB_REPOSITORY_OWNER}/artifacts/metadata/storage-record" \
               --header "Accept: application/vnd.github+json" \
-              --header "Authorization: Bearer ${GITHUB_TOKEN}" \
+              --header "Authorization: Bearer ${API_TOKEN}" \
               --header "X-GitHub-Api-Version: ${GITHUB_API_VERSION}" \
               --data "${json_payload}")
 
