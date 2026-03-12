@@ -32,7 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GITHUB_TOKEN: ${{ github.token }}
-      GITHUB_API_VERSION: "2022-11-28"
+      GITHUB_API_VERSION: "2026-03-10"
       TFC_ORGANIZATION: "benoitblais-hashicorp"
     steps:
 
@@ -72,7 +72,7 @@ jobs:
 
           git archive --format=tar.gz --output=module.tar.gz "${release_tag}"
 
-          digest="sha256:$(sha256sum module.tar.gz | awk '{print $1}')"
+          local_digest="sha256:$(sha256sum module.tar.gz | awk '{print $1}')"
 
           artifact_name="${module_name}"
           artifact_url="https://app.terraform.io/app/${TFC_ORGANIZATION}/registry/modules/private/${TFC_ORGANIZATION}/${module_name}/${module_provider}/${version}"
@@ -83,17 +83,19 @@ jobs:
             echo "module_name=${module_name}"
             echo "release_tag=${release_tag}"
             echo "version=${version}"
-            echo "digest=${digest}"
+            echo "local_digest=${local_digest}"
             echo "artifact_file=module-${version}.tar.gz"
             echo "artifact_name=${artifact_name}"
             echo "artifact_url=${artifact_url}"
             echo "registry_url=${registry_url}"
             echo "repository_name=${repo_name}"
+            echo "repository_full_name=${GITHUB_REPOSITORY}"
           } >> "$GITHUB_OUTPUT"
 
           mv module.tar.gz "${{ github.workspace }}/${artifact_name}-${version}.tar.gz"
 
       - name: Upload module archive artifact
+        id: upload_artifact
         uses: actions/upload-artifact@v4
         with:
           name: module-release-${{ steps.values.outputs.version }}
@@ -101,10 +103,46 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      - name: Select digest for metadata API
+        id: digest
+        run: |
+          set -euo pipefail
+
+          raw_digest="${{ steps.upload_artifact.outputs.artifact-digest }}"
+          if [[ -z "${raw_digest}" ]]; then
+            echo "ERROR    | upload-artifact did not return artifact-digest output."
+            exit 1
+          fi
+
+          if [[ "${raw_digest}" == sha256:* ]]; then
+            subject_digest="${raw_digest}"
+          else
+            subject_digest="sha256:${raw_digest}"
+          fi
+
+          echo "INFO     | Local file digest: ${{ steps.values.outputs.local_digest }}"
+          echo "INFO     | Uploaded artifact digest: ${subject_digest}"
+          echo "subject_digest=${subject_digest}" >> "$GITHUB_OUTPUT"
+
       - name: Create attestation for module artifact
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: ${{ github.workspace }}/${{ steps.values.outputs.artifact_name }}-${{ steps.values.outputs.version }}.tar.gz
+
+      - name: Diagnose attestation visibility
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+
+          subject_digest="${{ steps.digest.outputs.subject_digest }}"
+          response=$(curl -sS --request GET \
+            --url "https://api.github.com/users/${GITHUB_REPOSITORY_OWNER}/attestations/${subject_digest}" \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer ${GITHUB_TOKEN}" \
+            --header "X-GitHub-Api-Version: ${GITHUB_API_VERSION}")
+
+          count=$(echo "${response}" | jq -r '.attestations | length // 0' 2>/dev/null || echo "0")
+          echo "INFO     | Attestations found for ${subject_digest}: ${count}"
 
       - name: Create artifact metadata storage record
         run: |
@@ -113,11 +151,11 @@ jobs:
           json_payload=$(jq -n \
             --arg name "${{ steps.values.outputs.artifact_name }}" \
             --arg version "${{ steps.values.outputs.version }}" \
-            --arg digest "${{ steps.values.outputs.digest }}" \
+            --arg digest "${{ steps.digest.outputs.subject_digest }}" \
             --arg artifact_url "${{ steps.values.outputs.artifact_url }}" \
             --arg registry_url "${{ steps.values.outputs.registry_url }}" \
             --arg repository "${{ steps.values.outputs.module_name }}" \
-            --arg github_repository "${{ steps.values.outputs.repository_name }}" \
+            --arg github_repository "${{ steps.values.outputs.repository_full_name }}" \
             '{
               name: $name,
               version: $version,
