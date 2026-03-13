@@ -34,7 +34,7 @@ The following requirements are needed by this module:
 
 - <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) (>= 1.7.5)
 
-- <a name="requirement_random"></a> [random](#requirement\_random) (3.7.2)
+- <a name="requirement_random"></a> [random](#requirement\_random) (3.8.0)
 
 ## Modules
 
@@ -52,7 +52,7 @@ No optional inputs.
 
 The following resources are used by this module:
 
-- [random_uuid.this](https://registry.terraform.io/providers/hashicorp/random/3.7.2/docs/resources/uuid) (resource)
+- [random_uuid.this](https://registry.terraform.io/providers/hashicorp/random/3.8.0/docs/resources/uuid) (resource)
 
 ## Outputs
 
